@@ -1,0 +1,8 @@
+# ── Ideogram 4 (nf4 quantized — fits in 24GB) ────────────────────────────────
+https://huggingface.co/ideogram-ai/ideogram-4-nf4/resolve/main/ideogram4-nf4.safetensors  /app/models/diffusion_models/ideogram4-nf4.safetensors
+
+# ── FLUX.1 dev (for when you want photorealism) ───────────────────────────────
+https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors  /app/models/checkpoints/flux1-dev.safetensors
+
+# ── VAE ───────────────────────────────────────────────────────────────────────
+https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors  /app/models/vae/flux-ae.safetensors
