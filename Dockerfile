@@ -1,32 +1,50 @@
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# System deps
 RUN apt-get update && apt-get install -y \
-    git python3.11 python3.11-venv python3-pip \
-    libgl1 libglib2.0-0 wget \
+    python3 python3-pip git wget curl \
+    libgl1 libglib2.0-0 aria2 \
     && rm -rf /var/lib/apt/lists/*
-
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python3
 
 WORKDIR /app
 
-RUN git clone https://github.com/vladmandic/sdnext.git .
+# Clone ComfyUI
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app
 
-RUN python3 -m venv venv
-ENV PATH="/app/venv/bin:$PATH"
+# Install PyTorch + ComfyUI deps
+RUN pip3 install --no-cache-dir \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu121
 
-RUN python3 launch.py --skip-git --debug --test || true
+RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
-RUN pip install -U huggingface_hub
+# Install ComfyUI Manager
+RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git \
+    /app/custom_nodes/ComfyUI-Manager \
+    && pip3 install --no-cache-dir \
+    -r /app/custom_nodes/ComfyUI-Manager/requirements.txt
 
-ARG HF_TOKEN
-# --cache-dir (not --local-dir) preserves the models--<author>--<repo> layout
-# SD.Next expects under <models-dir>/Diffusers
-RUN hf auth login --token "$HF_TOKEN" && \
-    hf download ideogram-ai/ideogram-4-fp8 \
-    --cache-dir /app/models/Diffusers
+# Install huggingface_hub for model downloads
+RUN pip3 install --no-cache-dir huggingface_hub hf_transfer
 
-EXPOSE 7860
+# Create model directories
+RUN mkdir -p \
+    /app/models/checkpoints \
+    /app/models/vae \
+    /app/models/loras \
+    /app/models/controlnet \
+    /app/models/diffusion_models \
+    /app/models/clip \
+    /app/models/unet
 
-# Removed --ckpt-dir: not a valid SD.Next argument
-CMD ["python3", "launch.py", "--listen", "--port", "7860", "--use-cuda", "--api", \
-     "--models-dir", "/app/models"]
+COPY entrypoint.sh /app/entrypoint.sh
+COPY models.txt /app/models.txt
+RUN chmod +x /app/entrypoint.sh
+
+EXPOSE 8188
+
+ENTRYPOINT ["/app/entrypoint.sh"]
