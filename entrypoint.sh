@@ -25,7 +25,7 @@ provider = DigitalOcean
 env_auth = false
 access_key_id = ${AWS_ACCESS_KEY_ID}
 secret_access_key = ${AWS_SECRET_ACCESS_KEY}
-endpoint = ${SPACES_ENDPOINT}
+endpoint = ams3.digitaloceanspaces.com
 region = ${AWS_DEFAULT_REGION}
 acl = private
 EOF
@@ -34,14 +34,15 @@ echo "Downloading workspace..."
 
 mkdir -p ${WORKSPACE}
 
-if rclone lsd ${REMOTE}:${SPACES_BUCKET}; then
+if rclone lsd ${REMOTE}:${SPACES_BUCKET} --s3-no-check-bucket; then
 
     rclone copy \
         ${REMOTE}:${SPACES_BUCKET} \
         ${WORKSPACE} \
         --fast-list \
         --transfers 16 \
-        --checkers 16
+        --checkers 16 \
+        --s3-no-check-bucket
 
 fi
 
@@ -79,16 +80,17 @@ fi
 (
 while true
 do
-sleep 60
+    sleep 60
 
-echo "Uploading changes..."
+    echo "Uploading changes..."
 
-rclone copy \
-${WORKSPACE} \
-${REMOTE}:${SPACES_BUCKET} \
---fast-list \
---transfers 16 \
---checkers 16
+    rclone copy \
+        ${WORKSPACE} \
+        ${REMOTE}:${SPACES_BUCKET} \
+        --fast-list \
+        --transfers 16 \
+        --checkers 16 \
+        --s3-no-check-bucket
 
 done
 ) &
@@ -96,6 +98,6 @@ done
 echo "Starting ComfyUI..."
 
 exec python /app/main.py \
---listen 0.0.0.0 \
---port 8188 \
---extra-model-paths-config /workspace/extra_model_paths.yaml
+    --listen 0.0.0.0 \
+    --port 8188 \
+    --extra-model-paths-config /workspace/extra_model_paths.yaml
