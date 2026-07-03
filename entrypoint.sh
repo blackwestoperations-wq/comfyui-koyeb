@@ -1,6 +1,3 @@
-bash
-
-cat > /home/claude/comfyui-koyeb/entrypoint.sh << 'EOF'
 #!/bin/bash
 set -e
 
