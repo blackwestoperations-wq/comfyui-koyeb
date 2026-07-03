@@ -1,8 +1,56 @@
-# ── Ideogram 4 (nf4 quantized — fits in 24GB) ────────────────────────────────
-https://huggingface.co/ideogram-ai/ideogram-4-nf4/resolve/main/ideogram4-nf4.safetensors  /app/models/diffusion_models/ideogram4-nf4.safetensors
+# ═══════════════════════════════════════════════════════════════════════════════
+# ComfyUI Model Downloads
+# Format: URL  ABSOLUTE_DEST_PATH
+#
+# All URLs below come from Comfy-Org/Ideogram-4 — the official ComfyUI
+# repackaging of the ideogram-ai/ideogram-4-fp8 weights.
+#
+# ⚠  LICENSE: Non-commercial only (ideogram-non-commercial-model-agreement)
+#    Accept the gate at https://huggingface.co/ideogram-ai/ideogram-4-fp8
+#    before deploying, and set HF_TOKEN as a Koyeb secret.
+#
+# VRAM requirements (fp8 set):
+#   Both diffusion models:  ~18.6 GB total
+#   Text encoder (Qwen3):   ~10.6 GB
+#   Text encoder (Gemma4):  ~  2   GB
+#   VAE:                    ~  0.3 GB
+#   ─────────────────────────────────
+#   Minimum recommended:    32 GB VRAM  (L40S, A100-80GB, H100)
+#
+# For 16–24 GB VRAM cards, swap fp8 diffusion models for nvfp4 variants
+# (see commented-out section at the bottom of this file).
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── FLUX.1 dev (for when you want photorealism) ───────────────────────────────
-https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors  /app/models/checkpoints/flux1-dev.safetensors
 
-# ── VAE ───────────────────────────────────────────────────────────────────────
-https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors  /app/models/vae/flux-ae.safetensors
+# ── VAE (~335 MB) ─────────────────────────────────────────────────────────────
+# Shared with FLUX.2 — skip if you already have flux2-vae.safetensors
+https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors /app/models/vae/flux2-vae.safetensors
+
+
+# ── Diffusion models — FP8 (~9.28 GB each, ~18.6 GB total) ───────────────────
+# ideogram4_fp8_scaled      = conditional model  (handles your prompt)
+# ideogram4_unconditional   = unconditional model (handles CFG guidance)
+# Both are required. Missing either one causes generation to fail.
+https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_fp8_scaled.safetensors /app/models/diffusion_models/ideogram4_fp8_scaled.safetensors
+https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_fp8_scaled.safetensors /app/models/diffusion_models/ideogram4_unconditional_fp8_scaled.safetensors
+
+
+# ── Text encoders ─────────────────────────────────────────────────────────────
+# Qwen3-VL-8B (~10.6 GB) — primary encoder, handles prompt understanding
+# and structured JSON captions. Required.
+https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors /app/models/text_encoders/qwen3vl_8b_fp8_scaled.safetensors
+
+# Gemma4 (~2 GB) — secondary encoder, improves text rendering quality.
+# Required for full quality; generation may degrade without it.
+https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors /app/models/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NVFP4 ALTERNATIVE — for 16–24 GB VRAM (comment out fp8 lines above and
+# uncomment these instead). Quality is slightly lower but fits smaller GPUs.
+# ═══════════════════════════════════════════════════════════════════════════════
+# https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_nvfp4_mixed.safetensors /app/models/diffusion_models/ideogram4_nvfp4_mixed.safetensors
+# https://huggingface.co/Comfy-Org/Ideogram-4/resolve/main/diffusion_models/ideogram4_unconditional_nvfp4_mixed.safetensors /app/models/diffusion_models/ideogram4_unconditional_nvfp4_mixed.safetensors
+# https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_8b_nvfp4.safetensors /app/models/text_encoders/qwen3vl_8b_nvfp4.safetensors
+# https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors /app/models/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors
+# https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors /app/models/vae/flux2-vae.safetensors
