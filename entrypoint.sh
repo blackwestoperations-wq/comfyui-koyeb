@@ -91,14 +91,24 @@ mkdir -p /app/user/__manager
 # ComfyUI Manager configuration
 # ---------------------------------------------------
 
-cat >/app/user/__manager/config.ini <<EOF
-[default]
+CONFIG_CONTENT='[default]
 security_level = weak
+allow_git_url_install = true
 network_mode = public
-EOF
+update_policy = stable
+skip_migration_check = true
+'
 
-echo "ComfyUI-Manager security level set to WEAK."
+for DIR in \
+    /app/user/__manager \
+    /app/user/default/ComfyUI-Manager \
+    /app/user/ComfyUI-Manager
+do
+    mkdir -p "$DIR"
+    echo "$CONFIG_CONTENT" > "$DIR/config.ini"
+done
 
+echo "ComfyUI Manager configured."
 # ---------------------------------------------------
 # Output uploader
 # ---------------------------------------------------
