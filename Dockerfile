@@ -1,62 +1,80 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+# Latest stable PyTorch runtime (includes CUDA and cuDNN)
+FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
 
-# System dependencies
+WORKDIR /app
+
+# --------------------------------------------------------------------
+# System packages
+# --------------------------------------------------------------------
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
     git \
     curl \
+    wget \
+    ffmpeg \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxrender1 \
     libxext6 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+# --------------------------------------------------------------------
+# Clone latest ComfyUI
+# --------------------------------------------------------------------
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git .
 
-WORKDIR /app
+# --------------------------------------------------------------------
+# Upgrade pip
+# --------------------------------------------------------------------
+RUN python -m pip install --upgrade pip setuptools wheel
 
-# Clone ComfyUI
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app
-
-# Install PyTorch
-RUN python3 -m pip install --no-cache-dir \
-    torch==2.3.1 \
-    torchvision==0.18.1 \
-    torchaudio==2.3.1 \
-    --index-url https://download.pytorch.org/whl/cu118
-
+# --------------------------------------------------------------------
 # Install ComfyUI requirements
-RUN python3 -m pip install --no-cache-dir -r /app/requirements.txt
+# --------------------------------------------------------------------
+RUN pip install -r requirements.txt
 
-# Install ComfyUI-Manager
+# --------------------------------------------------------------------
+# Install ComfyUI Manager
+# --------------------------------------------------------------------
 RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git \
-    /app/custom_nodes/ComfyUI-Manager && \
-    python3 -m pip install --no-cache-dir \
-    -r /app/custom_nodes/ComfyUI-Manager/requirements.txt
+    custom_nodes/ComfyUI-Manager
 
-# Create model folders
+RUN pip install \
+    -r custom_nodes/ComfyUI-Manager/requirements.txt
+
+# --------------------------------------------------------------------
+# Model directories
+# --------------------------------------------------------------------
 RUN mkdir -p \
-    /app/models/checkpoints \
-    /app/models/diffusion_models \
-    /app/models/text_encoders \
-    /app/models/vae \
-    /app/models/loras \
-    /app/models/controlnet \
-    /app/models/clip \
-    /app/output \
-    /app/input
+    models/checkpoints \
+    models/diffusion_models \
+    models/clip \
+    models/clip_vision \
+    models/controlnet \
+    models/embeddings \
+    models/gligen \
+    models/hypernetworks \
+    models/loras \
+    models/style_models \
+    models/text_encoders \
+    models/unet \
+    models/upscale_models \
+    models/vae \
+    models/vae_approx \
+    input \
+    output \
+    user
 
-COPY entrypoint.sh /app/entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 8188
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
