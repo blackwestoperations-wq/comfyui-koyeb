@@ -1,44 +1,61 @@
 #!/bin/bash
-echo "==> CUDA driver version:"
-cat /proc/driver/nvidia/version 2>/dev/null || echo "nvidia driver file not found"
-nvidia-smi 2>/dev/null || echo "nvidia-smi not available"
-
 set -e
 
-echo "==> Starting ComfyUI setup..."
+echo "========================================"
+echo "  ComfyUI + Manager  |  Koyeb Startup"
+echo "========================================"
 
-# Speed up HuggingFace downloads
+# Speed up HuggingFace downloads via hf_transfer
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Download models listed in models.txt
-# Format: URL DESTINATION_PATH
-while IFS= read -r line || [ -n "$line" ]; do
-  # Skip blank lines and comments
-  [[ -z "$line" || "$line" == \#* ]] && continue
+# ── Model downloader ─────────────────────────────────────────────────────────
+# Downloads a file from URL to an absolute DEST path.
+# Skips if the file already exists (won't help with autoscaling cold starts,
+# but avoids re-downloading if the container is merely restarted).
+download_model() {
+  local URL="$1"
+  local DEST="$2"
 
-  URL=$(echo "$line" | awk '{print $1}')
-  DEST=$(echo "$line" | awk '{print $2}')
+  if [ -f "$DEST" ]; then
+    echo "[SKIP] Already present: $(basename "$DEST")"
+    return 0
+  fi
 
-  if [ ! -f "$DEST" ]; then
-    echo "==> Downloading: $URL"
-    echo "    → $DEST"
-    mkdir -p "$(dirname "$DEST")"
-    aria2c --console-log-level=error \
-           --summary-interval=0 \
-           -x 8 -s 8 -k 1M \
-           --out="$DEST" "$URL" \
-           --header="Authorization: Bearer ${HF_TOKEN}" || \
+  mkdir -p "$(dirname "$DEST")"
+  echo "[DOWN] $(basename "$DEST")"
+  echo "       → $DEST"
+
+  # Try wget with auth header; fall back without if no HF_TOKEN set
+  if [ -n "$HF_TOKEN" ]; then
     wget -q --show-progress \
          --header="Authorization: Bearer ${HF_TOKEN}" \
          -O "$DEST" "$URL"
-    echo "    ✓ Done"
   else
-    echo "==> Already exists, skipping: $DEST"
+    wget -q --show-progress \
+         -O "$DEST" "$URL"
   fi
+
+  echo "[DONE] $(basename "$DEST")"
+}
+
+# ── Read and process models.txt ───────────────────────────────────────────────
+# Format of each line:  URL  ABSOLUTE_DEST_PATH
+# Lines starting with # are comments; blank lines are ignored.
+
+echo ""
+echo "--- Downloading models ---"
+while IFS=' ' read -r URL DEST || [ -n "$URL" ]; do
+  # Skip blank lines and comments
+  [[ -z "$URL" || "$URL" == \#* ]] && continue
+  download_model "$URL" "$DEST"
 done < /app/models.txt
 
-echo "==> All models ready. Starting ComfyUI..."
+echo ""
+echo "--- All models ready ---"
+echo ""
 
+# ── Launch ComfyUI ────────────────────────────────────────────────────────────
+echo "Starting ComfyUI on port 8188..."
 exec python3 /app/main.py \
   --listen 0.0.0.0 \
   --port 8188 \
