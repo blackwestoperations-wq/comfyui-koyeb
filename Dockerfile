@@ -15,9 +15,8 @@ WORKDIR /app
 # Clone ComfyUI
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app
 
-# Install PyTorch + ComfyUI deps
 RUN pip3 install --no-cache-dir \
-    torch torchvision torchaudio \
+    torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 \
     --index-url https://download.pytorch.org/whl/cu121
 
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
