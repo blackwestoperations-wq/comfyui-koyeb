@@ -16,6 +16,10 @@ if torch.cuda.is_available():
     print(torch.cuda.get_device_name(0))
 EOF
 
+# ---------------------------------------------------
+# Configure rclone
+# ---------------------------------------------------
+
 mkdir -p /root/.config/rclone
 
 cat >/root/.config/rclone/rclone.conf <<EOF
@@ -30,64 +34,99 @@ region = ${AWS_DEFAULT_REGION}
 acl = private
 EOF
 
-mkdir -p ${WORKSPACE}/{models,custom_nodes,user,input,output,workflows}
+# ---------------------------------------------------
+# Workspace
+# ---------------------------------------------------
 
-echo "BOOT: Downloading static assets only (NO SYNC BACK)..."
+mkdir -p \
+    ${WORKSPACE}/models \
+    ${WORKSPACE}/custom_nodes \
+    ${WORKSPACE}/user \
+    ${WORKSPACE}/input \
+    ${WORKSPACE}/output \
+    ${WORKSPACE}/workflows
 
-# ⚠️ IMPORTANT: only pull stable assets, never full bucket
+echo "BOOT: Downloading models..."
+
 rclone copy \
     ${REMOTE}:${SPACES_BUCKET}/models \
     ${WORKSPACE}/models \
-    --transfers 4 \
-    --checkers 4 \
-    --s3-no-check-bucket \
     --ignore-existing \
     --exclude "*.partial" \
-    --log-level INFO || true
+    --transfers 4 \
+    --checkers 4 \
+    --s3-no-check-bucket || true
+
+echo "BOOT: Downloading workflows..."
 
 rclone copy \
     ${REMOTE}:${SPACES_BUCKET}/workflows \
     ${WORKSPACE}/workflows \
-    --transfers 4 \
-    --checkers 4 \
-    --s3-no-check-bucket \
     --ignore-existing \
     --exclude "*.partial" \
-    --log-level INFO || true
+    --transfers 4 \
+    --checkers 4 \
+    --s3-no-check-bucket || true
 
-echo "Linking ComfyUI paths..."
+# ---------------------------------------------------
+# Link workspace into ComfyUI
+# ---------------------------------------------------
 
-ln -sfn ${WORKSPACE}/models /app/models
-ln -sfn ${WORKSPACE}/custom_nodes /app/custom_nodes
-ln -sfn ${WORKSPACE}/user /app/user
-ln -sfn ${WORKSPACE}/output /app/output
-ln -sfn ${WORKSPACE}/input /app/input
+rm -rf /app/models
+ln -s ${WORKSPACE}/models /app/models
 
-# -----------------------------
-# SAFE OUTPUT UPLOADER ONLY
-# -----------------------------
-sync_outputs () {
+rm -rf /app/input
+ln -s ${WORKSPACE}/input /app/input
+
+rm -rf /app/output
+ln -s ${WORKSPACE}/output /app/output
+
+rm -rf /app/user
+ln -s ${WORKSPACE}/user /app/user
+
+# Keep built-in Manager but allow extra custom nodes
+mkdir -p /app/user/__manager
+
+# ---------------------------------------------------
+# ComfyUI Manager configuration
+# ---------------------------------------------------
+
+cat >/app/user/__manager/config.ini <<EOF
+[default]
+security_level = weak
+network_mode = public
+EOF
+
+echo "ComfyUI-Manager security level set to WEAK."
+
+# ---------------------------------------------------
+# Output uploader
+# ---------------------------------------------------
+
+sync_outputs() {
     while true; do
         sleep 60
 
-        echo "[UPLOAD] outputs only..."
+        echo "[UPLOAD] Syncing outputs..."
 
         rclone copy \
             ${WORKSPACE}/output \
             ${REMOTE}:${SPACES_BUCKET}/output \
-            --transfers 2 \
-            --checkers 2 \
-            --s3-no-check-bucket \
             --ignore-existing \
             --exclude "*.partial" \
             --exclude "*.tmp" \
+            --transfers 2 \
+            --checkers 2 \
+            --s3-no-check-bucket \
             --log-level ERROR || true
     done
 }
 
 sync_outputs &
 
+echo "=========================================="
 echo "Starting ComfyUI..."
+echo "=========================================="
 
 exec python /app/main.py \
     --listen 0.0.0.0 \
