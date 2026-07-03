@@ -1,4 +1,8 @@
 #!/bin/bash
+echo "==> CUDA driver version:"
+cat /proc/driver/nvidia/version 2>/dev/null || echo "nvidia driver file not found"
+nvidia-smi 2>/dev/null || echo "nvidia-smi not available"
+
 set -e
 
 echo "==> Starting ComfyUI setup..."
