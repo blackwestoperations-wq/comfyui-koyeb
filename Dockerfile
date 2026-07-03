@@ -6,12 +6,18 @@ ENV PYTHONUNBUFFERED=1
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-dev \
-    git wget curl \
-    libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 \
+    python3 \
+    python3-pip \
+    python3-dev \
+    git \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3 and pip3 point to the right place explicitly
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 WORKDIR /app
@@ -19,27 +25,23 @@ WORKDIR /app
 # Clone ComfyUI
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app
 
-# Install PyTorch cu118 — widest driver compatibility, supports driver 12.0.40
+# Install PyTorch
 RUN python3 -m pip install --no-cache-dir \
-    torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 \
+    torch==2.3.1 \
+    torchvision==0.18.1 \
+    torchaudio==2.3.1 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# Verify torch+CUDA loaded correctly at build time
-RUN python3 -c "import torch; print('Torch version:', torch.__version__); print('CUDA available at build:', torch.cuda.is_available())"
-
-# Install ComfyUI Python dependencies
+# Install ComfyUI requirements
 RUN python3 -m pip install --no-cache-dir -r /app/requirements.txt
 
 # Install ComfyUI-Manager
 RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git \
-    /app/custom_nodes/ComfyUI-Manager \
-    && python3 -m pip install --no-cache-dir \
+    /app/custom_nodes/ComfyUI-Manager && \
+    python3 -m pip install --no-cache-dir \
     -r /app/custom_nodes/ComfyUI-Manager/requirements.txt
 
-# Install download tools
-RUN python3 -m pip install --no-cache-dir huggingface_hub hf_transfer
-
-# Pre-create all model directories
+# Create model folders
 RUN mkdir -p \
     /app/models/checkpoints \
     /app/models/diffusion_models \
@@ -52,7 +54,7 @@ RUN mkdir -p \
     /app/input
 
 COPY entrypoint.sh /app/entrypoint.sh
-COPY models.txt /app/models.txt
+
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8188
