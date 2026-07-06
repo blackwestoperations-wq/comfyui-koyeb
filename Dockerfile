@@ -24,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libxext6 \
     fuse \
-    fuse3 \
     util-linux \
  && rm -rf /var/lib/apt/lists/*
  
