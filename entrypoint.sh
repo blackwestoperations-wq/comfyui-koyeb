@@ -1,65 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =====================================================
-# ComfyUI + DigitalOcean Spaces — rclone mount edition
-# =====================================================
-# Strategy:
-#   1. Try rclone mount (instant boot, on-demand model fetching)
-#   2. Fallback: start ComfyUI immediately + background download
-#   3. Custom nodes synced at boot (small, needed for imports)
-#   4. Outputs uploaded in background
-# =====================================================
-
 WORKSPACE="/workspace"
 REMOTE="dospaces"
-MAX_RETRIES=3
+RCLONE_FLAGS="--inplace --s3-no-check-bucket --transfers 6 --checkers 8 --retries 3 --low-level-retries 5"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-}
+echo "=========================================="
+echo "ComfyUI + DO Spaces (Stateless Boot)"
+echo "=========================================="
 
-log "=========================================="
-log "ComfyUI + DO Spaces (rclone mount)"
-log "=========================================="
-
-# ---------------------------------------------------
-# GPU diagnostics
-# ---------------------------------------------------
-
-python - <<'EOF'
+python - <<EOF
 import torch
-print(f"PyTorch:  {torch.__version__}")
-print(f"CUDA:     {torch.cuda.is_available()}")
+print("PyTorch:", torch.__version__)
+print("CUDA:", torch.cuda.is_available())
 if torch.cuda.is_available():
-    props = torch.cuda.get_device_properties(0)
-    print(f"GPU:      {props.name}")
-    print(f"VRAM:     {props.total_memory / 1024**3:.1f} GB")
+    print(torch.cuda.get_device_name(0))
 EOF
-
-# ---------------------------------------------------
-# Validate required environment variables
-# ---------------------------------------------------
-
-REQUIRED_VARS=(
-    AWS_ACCESS_KEY_ID
-    AWS_SECRET_ACCESS_KEY
-    AWS_DEFAULT_REGION
-    SPACES_BUCKET
-)
-
-MISSING=0
-for var in "${REQUIRED_VARS[@]}"; do
-    if [[ -z "${!var:-}" ]]; then
-        log "ERROR: Required env var ${var} is not set"
-        MISSING=1
-    fi
-done
-[[ $MISSING -eq 1 ]] && exit 1
-
-SPACES_ENDPOINT="${SPACES_ENDPOINT:-ams3.digitaloceanspaces.com}"
-log "Endpoint: ${SPACES_ENDPOINT}"
-log "Bucket:   ${SPACES_BUCKET}"
 
 # ---------------------------------------------------
 # Configure rclone
@@ -67,220 +23,102 @@ log "Bucket:   ${SPACES_BUCKET}"
 
 mkdir -p /root/.config/rclone
 
-cat > /root/.config/rclone/rclone.conf <<EOF
-[${REMOTE}]
+cat >/root/.config/rclone/rclone.conf <<EOF
+[$REMOTE]
 type = s3
 provider = DigitalOcean
 env_auth = false
 access_key_id = ${AWS_ACCESS_KEY_ID}
 secret_access_key = ${AWS_SECRET_ACCESS_KEY}
-endpoint = ${SPACES_ENDPOINT}
+endpoint = ${SPACES_ENDPOINT:-ams3.digitaloceanspaces.com}
 region = ${AWS_DEFAULT_REGION}
 acl = private
 EOF
 
-log "rclone configured."
-
 # ---------------------------------------------------
-# Create workspace directories
+# Workspace dirs
 # ---------------------------------------------------
 
 mkdir -p \
-    "${WORKSPACE}/models" \
-    "${WORKSPACE}/custom_nodes" \
-    "${WORKSPACE}/user" \
-    "${WORKSPACE}/input" \
-    "${WORKSPACE}/output" \
-    "${WORKSPACE}/workflows" \
-    /tmp/rclone-cache
+    ${WORKSPACE}/models \
+    ${WORKSPACE}/custom_nodes \
+    ${WORKSPACE}/user \
+    ${WORKSPACE}/input \
+    ${WORKSPACE}/output \
+    ${WORKSPACE}/workflows
 
 # ---------------------------------------------------
-# Sync helper with retry
+# Download models from Spaces (with --inplace to fix rename errors)
 # ---------------------------------------------------
 
-sync_from_remote() {
-    local remote_subpath="$1"
-    local local_path="$2"
-    local label="$3"
-    local extra_excludes="${4:-}"
+echo "BOOT: Downloading models from Spaces..."
 
-    local attempt=1
-    while [[ ${attempt} -le ${MAX_RETRIES} ]]; do
-        log "[${label}] Sync attempt ${attempt}/${MAX_RETRIES}..."
+rclone copy \
+    ${REMOTE}:${SPACES_BUCKET}/models \
+    ${WORKSPACE}/models \
+    ${RCLONE_FLAGS} \
+    --ignore-existing \
+    --exclude "*.partial" \
+    --exclude "*.tmp" \
+    --exclude ".DS_Store" \
+    --exclude "Thumbs.db" \
+    || echo "WARN: model sync had issues, continuing..."
 
-        if rclone copy \
-            "${REMOTE}:${SPACES_BUCKET}/${remote_subpath}" \
-            "${local_path}" \
-            --ignore-existing \
-            --exclude "*.partial" \
-            --exclude "*.tmp" \
-            --transfers 6 \
-            --checkers 8 \
-            --retries 3 \
-            --low-level-retries 10 \
-            --s3-no-check-bucket \
-            --stats 2m \
-            --stats-one-line \
-            --log-level INFO \
-            ${extra_excludes}; then
-            log "[${label}] Sync complete."
-            return 0
-        fi
-
-        local wait_sec=$(( attempt * 10 ))
-        log "[${label}] Failed (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${wait_sec}s..."
-        sleep ${wait_sec}
-        attempt=$(( attempt + 1 ))
-    done
-
-    log "[${label}] WARNING: All ${MAX_RETRIES} attempts failed."
-    return 1
-}
+echo "BOOT: Models downloaded."
 
 # ---------------------------------------------------
-# Sync small directories first (needed at boot)
+# Download workflows
 # ---------------------------------------------------
 
-log "=== Phase 1: Syncing custom nodes ==="
-sync_from_remote "custom_nodes" "${WORKSPACE}/custom_nodes" "CUSTOM_NODES" "--exclude ComfyUI-Manager/**"
+echo "BOOT: Downloading workflows..."
 
-log "=== Phase 2: Syncing workflows ==="
-sync_from_remote "workflows" "${WORKSPACE}/workflows" "WORKFLOWS"
+rclone copy \
+    ${REMOTE}:${SPACES_BUCKET}/workflows \
+    ${WORKSPACE}/workflows \
+    ${RCLONE_FLAGS} \
+    --ignore-existing \
+    --exclude "*.partial" \
+    || echo "WARN: workflow sync had issues, continuing..."
 
 # ---------------------------------------------------
-# Model loading strategy: try rclone mount, fallback to copy
+# Download user settings & Manager config
 # ---------------------------------------------------
 
-USE_MOUNT=false
+echo "BOOT: Downloading user data..."
 
-if [[ -e /dev/fuse ]] || [[ -c /dev/fuse ]]; then
-    log "=== Phase 3: Attempting rclone mount ==="
-    log "FUSE device found at /dev/fuse"
+rclone copy \
+    ${REMOTE}:${SPACES_BUCKET}/user \
+    ${WORKSPACE}/user \
+    ${RCLONE_FLAGS} \
+    --ignore-existing \
+    --exclude "*.partial" \
+    || echo "WARN: user data sync had issues, continuing..."
 
-    # Clear models directory for mount
-    rm -rf "${WORKSPACE}/models"
-    mkdir -p "${WORKSPACE}/models"
+# ---------------------------------------------------
+# Download custom_nodes (persist installed nodes)
+# ---------------------------------------------------
 
-    # Start rclone mount in background
-    rclone mount \
-        "${REMOTE}:${SPACES_BUCKET}/models" \
-        "${WORKSPACE}/models" \
-        --vfs-cache-mode full \
-        --cache-dir /tmp/rclone-cache \
-        --dir-cache-time 1h \
-        --attr-timeout 1h \
-        --vfs-read-chunk-size 64M \
-        --vfs-read-chunk-size-limit 512M \
-        --transfers 4 \
-        --checkers 8 \
-        --s3-no-check-bucket \
-        --log-level INFO \
-        --log-file /tmp/rclone-mount.log &
+echo "BOOT: Downloading custom_nodes..."
 
-    RCLONE_MOUNT_PID=$!
+rclone copy \
+    ${REMOTE}:${SPACES_BUCKET}/custom_nodes \
+    ${WORKSPACE}/custom_nodes \
+    ${RCLONE_FLAGS} \
+    --ignore-existing \
+    --exclude "*.partial" \
+    --exclude "__pycache__/**" \
+    --exclude "*.pyc" \
+    || echo "WARN: custom_nodes sync had issues, continuing..."
 
-    # Wait for mount to become available
-    MOUNT_READY=false
-    for i in $(seq 1 15); do
-        sleep 1
-        if mountpoint -q "${WORKSPACE}/models" 2>/dev/null; then
-            MOUNT_READY=true
-            break
-        fi
-        # Alternative check if mountpoint command isn't available
-        if [[ -n "$(ls -A ${WORKSPACE}/models 2>/dev/null)" ]]; then
-            MOUNT_READY=true
-            break
+# Install any requirements from synced custom_nodes
+if [ -d "${WORKSPACE}/custom_nodes" ]; then
+    for req in ${WORKSPACE}/custom_nodes/*/requirements.txt; do
+        if [ -f "$req" ]; then
+            node_name=$(basename $(dirname "$req"))
+            echo "  Installing deps for: ${node_name}"
+            pip install -r "$req" --quiet || echo "  WARN: failed deps for ${node_name}"
         fi
     done
-
-    if [[ "${MOUNT_READY}" == "true" ]]; then
-        log "rclone mount successful! Models are available on-demand."
-        log "Models will be fetched from Spaces as they're loaded."
-        USE_MOUNT=true
-
-        # List available models (triggers S3 LIST — fast)
-        log "=== Available models (remote listing) ==="
-        rclone lsf \
-            "${REMOTE}:${SPACES_BUCKET}/models" \
-            --recursive \
-            --s3-no-check-bucket \
-            --files-only \
-            2>/dev/null | head -50 || true
-        log "(showing first 50 — more may exist)"
-    else
-        log "rclone mount failed — /dev/fuse exists but mount didn't come up."
-        log "Check /tmp/rclone-mount.log for details."
-        log "Falling back to background sync mode."
-        kill ${RCLONE_MOUNT_PID} 2>/dev/null || true
-        sleep 2
-        rm -rf "${WORKSPACE}/models"
-        mkdir -p "${WORKSPACE}/models"
-    fi
-else
-    log "=== Phase 3: /dev/fuse not found — using background sync ==="
-    mkdir -p "${WORKSPACE}/models"
-fi
-
-# ---------------------------------------------------
-# Fallback: background model download
-# ---------------------------------------------------
-
-if [[ "${USE_MOUNT}" == "false" ]]; then
-    log "Starting background model download..."
-    log "ComfyUI will boot immediately — models appear as they download."
-
-    (
-        log "[MODEL-SYNC] Downloading from Spaces..."
-
-        # Download checkpoints first (most commonly needed)
-        rclone copy \
-            "${REMOTE}:${SPACES_BUCKET}/models/checkpoints" \
-            "${WORKSPACE}/models/checkpoints" \
-            --ignore-existing \
-            --exclude "*.partial" \
-            --transfers 4 \
-            --checkers 8 \
-            --s3-no-check-bucket \
-            --log-level ERROR \
-            || true
-
-        log "[MODEL-SYNC] Checkpoints done. Downloading remaining models..."
-
-        # Then everything else
-        rclone copy \
-            "${REMOTE}:${SPACES_BUCKET}/models" \
-            "${WORKSPACE}/models" \
-            --ignore-existing \
-            --exclude "*.partial" \
-            --exclude "checkpoints/**" \
-            --transfers 4 \
-            --checkers 8 \
-            --s3-no-check-bucket \
-            --log-level ERROR \
-            || true
-
-        log "[MODEL-SYNC] All models downloaded."
-    ) &
-
-    # Also run periodic sync to catch newly uploaded models
-    (
-        sleep 300
-        while true; do
-            log "[MODEL-SYNC] Checking for new models..."
-            rclone copy \
-                "${REMOTE}:${SPACES_BUCKET}/models" \
-                "${WORKSPACE}/models" \
-                --ignore-existing \
-                --exclude "*.partial" \
-                --transfers 2 \
-                --checkers 4 \
-                --s3-no-check-bucket \
-                --log-level ERROR \
-                || true
-            sleep 600
-        done
-    ) &
 fi
 
 # ---------------------------------------------------
@@ -288,22 +126,24 @@ fi
 # ---------------------------------------------------
 
 for dir in models input output user; do
-    rm -rf "/app/${dir}"
-    ln -s "${WORKSPACE}/${dir}" "/app/${dir}"
+    rm -rf /app/${dir}
+    ln -s ${WORKSPACE}/${dir} /app/${dir}
 done
 
-# Copy synced custom nodes into ComfyUI's custom_nodes directory
-# (ComfyUI-Manager is already in /app/custom_nodes/ from Docker build)
-if [[ -d "${WORKSPACE}/custom_nodes" ]] && [[ -n "$(ls -A ${WORKSPACE}/custom_nodes 2>/dev/null)" ]]; then
-    log "Copying synced custom nodes into ComfyUI..."
-    cp -rn "${WORKSPACE}/custom_nodes/"* /app/custom_nodes/ 2>/dev/null || true
-
-    # Install requirements for synced custom nodes
-    log "Checking custom node requirements..."
-    find /app/custom_nodes -name "requirements.txt" -maxdepth 2 | while read req; do
-        log "  Installing: ${req}"
-        pip install -r "${req}" --quiet 2>/dev/null || true
+# Merge custom_nodes: symlink synced ones into /app/custom_nodes
+mkdir -p /app/custom_nodes
+if [ -d "${WORKSPACE}/custom_nodes" ]; then
+    for node_dir in ${WORKSPACE}/custom_nodes/*/; do
+        node_name=$(basename "$node_dir")
+        if [ "$node_name" != "*" ] && [ ! -L "/app/custom_nodes/${node_name}" ]; then
+            ln -s "${node_dir}" "/app/custom_nodes/${node_name}"
+        fi
     done
+fi
+
+# Ensure ComfyUI-Manager exists (it's in the Docker image already)
+if [ ! -d "/app/custom_nodes/ComfyUI-Manager" ]; then
+    ln -s /app/custom_nodes/ComfyUI-Manager /app/custom_nodes/ComfyUI-Manager 2>/dev/null || true
 fi
 
 mkdir -p /app/user/__manager
@@ -325,107 +165,68 @@ for DIR in \
     /app/user/default/ComfyUI-Manager \
     /app/user/ComfyUI-Manager
 do
-    mkdir -p "${DIR}"
-    echo "${CONFIG_CONTENT}" > "${DIR}/config.ini"
+    mkdir -p "$DIR"
+    echo "$CONFIG_CONTENT" > "$DIR/config.ini"
 done
 
-log "ComfyUI Manager configured."
+echo "ComfyUI Manager configured."
 
 # ---------------------------------------------------
-# Background: Output uploader
+# Background sync: Upload outputs + new models + custom_nodes to Spaces
 # ---------------------------------------------------
 
-(
+sync_to_spaces() {
     while true; do
-        sleep 30
+        sleep 120
 
-        if [[ -z "$(ls -A ${WORKSPACE}/output 2>/dev/null)" ]]; then
-            continue
-        fi
-
-        log "[OUTPUT] Uploading..."
+        echo "[SYNC] Uploading outputs..."
         rclone copy \
-            "${WORKSPACE}/output" \
-            "${REMOTE}:${SPACES_BUCKET}/output" \
+            ${WORKSPACE}/output \
+            ${REMOTE}:${SPACES_BUCKET}/output \
+            ${RCLONE_FLAGS} \
             --ignore-existing \
             --exclude "*.partial" \
             --exclude "*.tmp" \
-            --transfers 4 \
-            --checkers 4 \
-            --s3-no-check-bucket \
             --log-level ERROR \
-            || log "[OUTPUT] Upload failed — will retry."
+            || true
+
+        echo "[SYNC] Uploading new models..."
+        rclone copy \
+            ${WORKSPACE}/models \
+            ${REMOTE}:${SPACES_BUCKET}/models \
+            ${RCLONE_FLAGS} \
+            --ignore-existing \
+            --exclude "*.partial" \
+            --exclude "*.tmp" \
+            --log-level ERROR \
+            || true
+
+        echo "[SYNC] Uploading custom_nodes..."
+        rclone copy \
+            /app/custom_nodes \
+            ${REMOTE}:${SPACES_BUCKET}/custom_nodes \
+            ${RCLONE_FLAGS} \
+            --ignore-existing \
+            --exclude "*.partial" \
+            --exclude "__pycache__/**" \
+            --exclude "*.pyc" \
+            --exclude "*/.git/**" \
+            --log-level ERROR \
+            || true
+
+        echo "[SYNC] Upload complete."
     done
-) &
+}
 
-# ---------------------------------------------------
-# Background: Custom nodes uploader
-# (Persists nodes installed via web UI)
-# ---------------------------------------------------
-
-(
-    sleep 120
-    while true; do
-        if [[ -n "$(ls -A /app/custom_nodes 2>/dev/null)" ]]; then
-            rclone copy \
-                /app/custom_nodes \
-                "${REMOTE}:${SPACES_BUCKET}/custom_nodes" \
-                --ignore-existing \
-                --exclude "ComfyUI-Manager/**" \
-                --exclude "__pycache__/**" \
-                --exclude "*.pyc" \
-                --transfers 2 \
-                --checkers 4 \
-                --s3-no-check-bucket \
-                --log-level ERROR \
-                || true
-        fi
-        sleep 300
-    done
-) &
-
-# ---------------------------------------------------
-# If using mount, keep rclone alive
-# ---------------------------------------------------
-
-if [[ "${USE_MOUNT}" == "true" ]]; then
-    (
-        while true; do
-            if ! kill -0 ${RCLONE_MOUNT_PID} 2>/dev/null; then
-                log "[MOUNT] rclone mount process died! Attempting restart..."
-                rclone mount \
-                    "${REMOTE}:${SPACES_BUCKET}/models" \
-                    "${WORKSPACE}/models" \
-                    --vfs-cache-mode full \
-                    --cache-dir /tmp/rclone-cache \
-                    --dir-cache-time 1h \
-                    --attr-timeout 1h \
-                    --vfs-read-chunk-size 64M \
-                    --vfs-read-chunk-size-limit 512M \
-                    --transfers 4 \
-                    --checkers 8 \
-                    --s3-no-check-bucket \
-                    --log-level INFO \
-                    --log-file /tmp/rclone-mount.log &
-                RCLONE_MOUNT_PID=$!
-            fi
-            sleep 30
-        done
-    ) &
-fi
+sync_to_spaces &
 
 # ---------------------------------------------------
 # Start ComfyUI
 # ---------------------------------------------------
 
-log "=========================================="
-log "Starting ComfyUI on 0.0.0.0:8188"
-if [[ "${USE_MOUNT}" == "true" ]]; then
-    log "Mode: rclone mount (on-demand fetching)"
-else
-    log "Mode: background sync (models downloading)"
-fi
-log "=========================================="
+echo "=========================================="
+echo "Starting ComfyUI..."
+echo "=========================================="
 
 exec python /app/main.py \
     --listen 0.0.0.0 \
