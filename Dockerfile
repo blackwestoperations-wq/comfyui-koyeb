@@ -8,7 +8,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     git-lfs \
     curl \
@@ -24,8 +24,10 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     libxext6 \
     fuse \
+    fuse3 \
+    util-linux \
  && rm -rf /var/lib/apt/lists/*
-
+ 
 RUN git lfs install
 
 RUN curl https://rclone.org/install.sh | bash
