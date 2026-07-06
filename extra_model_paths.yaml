@@ -1,4 +1,6 @@
-checkpoints: /workspace/models/checkpoints/
+workspace:
+    path: /workspace/models/checkpoints: /workspace/models/checkpoints/
+    
 vae: /workspace/models/vae/
 loras: /workspace/models/loras/
 clip: /workspace/models/clip/
