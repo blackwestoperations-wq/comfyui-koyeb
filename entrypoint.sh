@@ -74,11 +74,15 @@ network_mode = public
 update_policy = stable
 skip_migration_check = true
 '
-for DIR in /app/user/__manager /app/user/default/ComfyUI-Manager /app/user/ComfyUI-Manager; do
+
+for DIR in \
+    /app/custom_nodes/ComfyUI-Manager \
+    /app/user/__manager \
+    /app/user/default/ComfyUI-Manager \
+    /app/user/ComfyUI-Manager; do
     mkdir -p "$DIR"
     echo "$CONFIG_CONTENT" > "$DIR/config.ini"
 done
-
 # ---------------------------------------------------
 # Attempt FUSE lazy mount for models
 # FIXED: errors now logged to file instead of /dev/null
