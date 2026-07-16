@@ -1,78 +1,134 @@
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
-# ── Environment ────────────────────────────────────────────────────────────
+################################################################################
+# Environment
+################################################################################
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    # Triton JIT-compiles a C file at startup — point it at gcc explicitly
-    CC=gcc \
-    # ComfyUI Manager: allow installing nodes from raw git URLs
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CC=/usr/bin/gcc \
+    CXX=/usr/bin/g++ \
     ALLOW_GIT_URL_INSTALL=1 \
-    COMFYUI_PATH=/app/ComfyUI
+    COMFYUI_PATH=/app/ComfyUI \
+    HF_HOME=/app/cache/huggingface \
+    TORCH_HOME=/app/cache/torch
 
-# ── System dependencies ────────────────────────────────────────────────────
+################################################################################
+# System packages
+################################################################################
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
+    python3-dev \
     python3-venv \
     git \
-    wget \
     curl \
-    # build-essential (gcc, make, …) is required by triton at runtime:
-    # it JIT-compiles driver.c into a shared library on first launch.
+    wget \
+    ca-certificates \
     build-essential \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    ninja-build \
+    pkg-config \
+    ffmpeg \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+################################################################################
+# ComfyUI
+################################################################################
 
 WORKDIR /app
 
-# ── ComfyUI ────────────────────────────────────────────────────────────────
-RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
+RUN git clone \
+    --depth 1 \
+    https://github.com/comfyanonymous/ComfyUI.git \
+    /app/ComfyUI
 
-# PyTorch with CUDA 12.1 — pin versions for reproducible builds
+################################################################################
+# PyTorch
+################################################################################
+
 RUN pip3 install \
     torch==2.3.1+cu121 \
     torchvision==0.18.1+cu121 \
     torchaudio==2.3.1+cu121 \
     --index-url https://download.pytorch.org/whl/cu121
 
+################################################################################
+# Python dependencies
+################################################################################
+
 RUN pip3 install -r /app/ComfyUI/requirements.txt
 
-# ── ComfyUI Manager ────────────────────────────────────────────────────────
-RUN git clone --depth 1 \
+################################################################################
+# ComfyUI Manager
+################################################################################
+
+RUN git clone \
+    --depth 1 \
     https://github.com/ltdrdata/ComfyUI-Manager.git \
     /app/ComfyUI/custom_nodes/ComfyUI-Manager
 
-RUN pip3 install -r /app/ComfyUI/custom_nodes/ComfyUI-Manager/requirements.txt
+RUN pip3 install \
+    -r /app/ComfyUI/custom_nodes/ComfyUI-Manager/requirements.txt
 
-# ── Manager config: security = weak ───────────────────────────────────────
+################################################################################
+# Manager config
+################################################################################
+
 COPY manager_config.ini \
-     /app/ComfyUI/custom_nodes/ComfyUI-Manager/config.ini
+/app/ComfyUI/custom_nodes/ComfyUI-Manager/config.ini
 
-# ── Model & output directories ─────────────────────────────────────────────
+################################################################################
+# Directories
+################################################################################
+
 RUN mkdir -p \
-    /app/ComfyUI/models/checkpoints \
-    /app/ComfyUI/models/clip \
-    /app/ComfyUI/models/clip_vision \
-    /app/ComfyUI/models/controlnet \
-    /app/ComfyUI/models/diffusers \
-    /app/ComfyUI/models/embeddings \
-    /app/ComfyUI/models/loras \
-    /app/ComfyUI/models/upscale_models \
-    /app/ComfyUI/models/vae \
-    /app/ComfyUI/output \
-    /app/ComfyUI/input \
-    /app/ComfyUI/temp
+/app/cache \
+/app/ComfyUI/input \
+/app/ComfyUI/output \
+/app/ComfyUI/temp \
+/app/ComfyUI/models/checkpoints \
+/app/ComfyUI/models/clip \
+/app/ComfyUI/models/clip_vision \
+/app/ComfyUI/models/controlnet \
+/app/ComfyUI/models/diffusers \
+/app/ComfyUI/models/embeddings \
+/app/ComfyUI/models/loras \
+/app/ComfyUI/models/upscale_models \
+/app/ComfyUI/models/unet \
+/app/ComfyUI/models/vae
 
-# ── Startup ────────────────────────────────────────────────────────────────
+################################################################################
+# Verify compiler exists
+################################################################################
+
+RUN gcc --version
+RUN g++ --version
+
+################################################################################
+# Startup
+################################################################################
+
 COPY start.sh /start.sh
+
 RUN chmod +x /start.sh
+
+WORKDIR /app/ComfyUI
 
 EXPOSE 8188
 
-CMD ["/start.sh"]
+ENTRYPOINT ["/start.sh"]
