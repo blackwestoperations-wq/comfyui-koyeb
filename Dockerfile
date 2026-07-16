@@ -1,30 +1,73 @@
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
+# ── Environment ────────────────────────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # ComfyUI Manager: allow installing nodes from raw git URLs
+    ALLOW_GIT_URL_INSTALL=1 \
+    COMFYUI_PATH=/app/ComfyUI
 
+# ── System dependencies ────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 python3.11-venv python3-pip \
-    git wget libgl1-mesa-glx libglib2.0-0 \
-    libsm6 libxext6 libxrender-dev libgomp1 \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
+    wget \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-
 WORKDIR /app
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git .
 
-RUN pip install --no-cache-dir \
-    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# ── ComfyUI ────────────────────────────────────────────────────────────────
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
 
-RUN pip install --no-cache-dir -r requirements.txt
+# PyTorch with CUDA 12.1 — pin versions for reproducible builds
+RUN pip3 install \
+    torch==2.3.1+cu121 \
+    torchvision==0.18.1+cu121 \
+    torchaudio==2.3.1+cu121 \
+    --index-url https://download.pytorch.org/whl/cu121
 
-RUN mkdir -p models/checkpoints models/vae models/clip \
-    models/controlnet models/loras models/upscale_models models/unet
+RUN pip3 install -r /app/ComfyUI/requirements.txt
+
+# ── ComfyUI Manager ────────────────────────────────────────────────────────
+RUN git clone --depth 1 \
+    https://github.com/ltdrdata/ComfyUI-Manager.git \
+    /app/ComfyUI/custom_nodes/ComfyUI-Manager
+
+RUN pip3 install -r /app/ComfyUI/custom_nodes/ComfyUI-Manager/requirements.txt
+
+# ── Manager config: security = weak ───────────────────────────────────────
+COPY manager_config.ini \
+     /app/ComfyUI/custom_nodes/ComfyUI-Manager/config.ini
+
+# ── Model & output directories ─────────────────────────────────────────────
+RUN mkdir -p \
+    /app/ComfyUI/models/checkpoints \
+    /app/ComfyUI/models/clip \
+    /app/ComfyUI/models/clip_vision \
+    /app/ComfyUI/models/controlnet \
+    /app/ComfyUI/models/diffusers \
+    /app/ComfyUI/models/embeddings \
+    /app/ComfyUI/models/loras \
+    /app/ComfyUI/models/upscale_models \
+    /app/ComfyUI/models/vae \
+    /app/ComfyUI/output \
+    /app/ComfyUI/input \
+    /app/ComfyUI/temp
+
+# ── Startup ────────────────────────────────────────────────────────────────
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 EXPOSE 8188
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8188/')" || exit 1
-
-CMD ["python3", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+CMD ["/start.sh"]
