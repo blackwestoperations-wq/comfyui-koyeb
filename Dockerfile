@@ -1,65 +1,50 @@
-FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+# ComfyUI on Koyeb GPU
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-# Replaced deprecated HF_HUB_ENABLE_HF_TRANSFER
-ENV HF_XET_HIGH_PERFORMANCE=1
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    COMFYUI_PORT=8188
 
-WORKDIR /app
-
-# Install system dependencies including fuse and kmod
-RUN apt-get update && apt-get install -y \
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
     git \
-    git-lfs \
-    curl \
     wget \
-    unzip \
-    ffmpeg \
-    build-essential \
-    rsync \
-    ca-certificates \
-    libgl1 \
+    libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
-    libxrender1 \
     libxext6 \
-    fuse \
-    kmod \
- && rm -rf /var/lib/apt/lists/*
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Allow non-root access to FUSE mounts (required for rclone --allow-other)
-RUN sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf
-
-RUN git lfs install
-
-# Install rclone
-RUN curl https://rclone.org/install.sh | bash
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 # Clone ComfyUI
+WORKDIR /app
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git .
 
-# Install Python dependencies
-RUN python -m pip install --upgrade pip setuptools wheel
-RUN pip install -r requirements.txt
+# Install PyTorch with CUDA 12.4
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# Install ComfyUI-Manager
-RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager
-RUN pip install -r custom_nodes/ComfyUI-Manager/requirements.txt
+# Install ComfyUI requirements
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install huggingface_hub
-RUN pip install huggingface_hub
+# Create model directories
+RUN mkdir -p models/checkpoints models/vae models/clip models/controlnet \
+    models/loras models/upscale_models models/unet
 
-# Create workspace directories
-RUN mkdir -p /workspace/models /workspace/custom_nodes /workspace/user /workspace/input /workspace/output /workspace/workflows
-
-# Copy entrypoint and config
-COPY entrypoint.sh /entrypoint.sh
-COPY extra_model_paths.yaml /workspace/extra_model_paths.yaml
-
-RUN chmod +x /entrypoint.sh
-
+# Expose ComfyUI's default port
 EXPOSE 8188
 
-ENTRYPOINT ["/entrypoint.sh"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8188/')" || exit 1
+
+# Start ComfyUI (listen on all interfaces)
+CMD ["python3", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
