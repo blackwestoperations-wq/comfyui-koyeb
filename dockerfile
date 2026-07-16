@@ -1,9 +1,11 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 # ── Environment ────────────────────────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    # Triton JIT-compiles a C file at startup — point it at gcc explicitly
+    CC=gcc \
     # ComfyUI Manager: allow installing nodes from raw git URLs
     ALLOW_GIT_URL_INSTALL=1 \
     COMFYUI_PATH=/app/ComfyUI
@@ -16,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     curl \
+    # build-essential (gcc, make, …) is required by triton at runtime:
+    # it JIT-compiles driver.c into a shared library on first launch.
+    build-essential \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
