@@ -62,10 +62,10 @@ RUN git clone \
 ################################################################################
 
 RUN pip3 install \
-    torch==2.3.1+cu121 \
-    torchvision==0.18.1+cu121 \
-    torchaudio==2.3.1+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
+    torch \
+    torchvision \
+    torchaudio \
+    --index-url https://download.pytorch.org/whl/cu128
 
 ################################################################################
 # Python dependencies
